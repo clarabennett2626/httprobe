@@ -1,6 +1,9 @@
 # httprobe
 
-Fast HTTP probe — check which URLs are alive from stdin. Reads URLs line by line and outputs the ones that respond.
+A fast, concurrent HTTP endpoint health checker with colored output.
+
+[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ## Install
 
@@ -8,37 +11,47 @@ Fast HTTP probe — check which URLs are alive from stdin. Reads URLs line by li
 go install github.com/clarabennett2626/httprobe@latest
 ```
 
-## Usage
+Or clone and build:
 
 ```bash
-# Basic usage — pipe URLs in
-cat urls.txt | httprobe
-
-# Show status codes
-echo -e "google.com\ngithub.com" | httprobe -s
-# [301] https://google.com
-# [200] https://github.com
-
-# Adjust concurrency and timeout
-cat large-list.txt | httprobe -c 20 -t 10
+git clone https://github.com/clarabennett2626/httprobe.git
+cd httprobe && go build -o httprobe .
 ```
 
-## Flags
+## Usage
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-c` | 10 | Concurrency level |
-| `-t` | 5 | Timeout in seconds |
-| `-s` | false | Show HTTP status codes |
+Check URLs from arguments:
 
-## How it works
+```bash
+httprobe google.com github.com example.com
+```
 
-- Reads URLs from stdin (one per line)
-- Automatically prepends `https://` if no scheme provided
-- Probes each URL concurrently
-- Outputs only responsive URLs
+Pipe URLs from a file or stdin:
 
-Useful for bug bounty recon, monitoring, or quickly checking which hosts from a list are up.
+```bash
+cat urls.txt | httprobe
+echo -e "google.com\ngithub.com" | httprobe
+```
+
+### Example Output
+
+```
+URL                                                  STATUS TIME
+──────────────────────────────────────────────────────────────────────
+✓ https://google.com                                  200      185ms
+✓ https://github.com                                  200      243ms
+✗ https://doesnotexist.invalid                        ERROR   timeout
+──────────────────────────────────────────────────────────────────────
+2 up  1 down  3 total
+```
+
+## Features
+
+- 🚀 **Concurrent** — all URLs checked in parallel
+- 🎨 **Colored output** — green for 2xx, yellow for 3xx, red for 4xx/5xx/errors
+- ⏱️ **Response times** — millisecond precision
+- 📥 **Stdin support** — pipe URL lists, one per line (# comments ignored)
+- 🔗 **Auto-prefix** — bare domains get `https://` automatically
 
 ## License
 
