@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -20,10 +22,10 @@ const (
 )
 
 type result struct {
-	url      string
-	status   int
-	duration time.Duration
-	err      error
+	URL      string  `json:"url"`
+	Status   int     `json:"status"`
+	Duration float64 `json:"duration_ms"`
+	Error    string  `json:"error,omitempty"`
 }
 
 func probe(url string, timeout time.Duration) result {
@@ -35,13 +37,14 @@ func probe(url string, timeout time.Duration) result {
 	start := time.Now()
 	resp, err := client.Get(url)
 	elapsed := time.Since(start)
+	ms := float64(elapsed.Microseconds()) / 1000.0
 
 	if err != nil {
-		return result{url: url, err: err, duration: elapsed}
+		return result{URL: url, Error: err.Error(), Duration: ms}
 	}
 	defer resp.Body.Close()
 
-	return result{url: url, status: resp.StatusCode, duration: elapsed}
+	return result{URL: url, Status: resp.StatusCode, Duration: ms}
 }
 
 func colorForStatus(code int) string {
@@ -58,23 +61,25 @@ func colorForStatus(code int) string {
 }
 
 func printResult(r result) {
-	if r.err != nil {
-		fmt.Printf("%s✗ %-50s %sERROR%s  %s%v%s\n", red, r.url, red, reset, dim, r.err, reset)
+	if r.Error != "" {
+		fmt.Printf("%s✗ %-50s %sERROR%s  %s%v%s\n", red, r.URL, red, reset, dim, r.Error, reset)
 		return
 	}
-	c := colorForStatus(r.status)
-	ms := float64(r.duration.Microseconds()) / 1000.0
-	fmt.Printf("%s✓ %-50s %s%d%s    %s%6.0fms%s\n", c, r.url, c, r.status, reset, dim, ms, reset)
+	c := colorForStatus(r.Status)
+	fmt.Printf("%s✓ %-50s %s%d%s    %s%6.0fms%s\n", c, r.URL, c, r.Status, reset, dim, r.Duration, reset)
 }
 
 func main() {
-	timeout := 10 * time.Second
+	timeoutSec := flag.Int("t", 10, "timeout per request in seconds")
+	concurrency := flag.Int("c", 10, "max concurrent requests")
+	jsonOutput := flag.Bool("j", false, "output results as JSON")
+	flag.Parse()
+
+	timeout := time.Duration(*timeoutSec) * time.Second
 	var urls []string
 
-	// Collect URLs from args
-	if len(os.Args) > 1 {
-		urls = append(urls, os.Args[1:]...)
-	}
+	// Collect URLs from positional args
+	urls = append(urls, flag.Args()...)
 
 	// Collect URLs from stdin if piped
 	stat, _ := os.Stdin.Stat()
@@ -89,30 +94,42 @@ func main() {
 	}
 
 	if len(urls) == 0 {
-		fmt.Fprintf(os.Stderr, "Usage: httprobe <url> [url...]\n")
-		fmt.Fprintf(os.Stderr, "       echo 'example.com' | httprobe\n")
+		fmt.Fprintf(os.Stderr, "Usage: httprobe [flags] <url> [url...]\n")
+		fmt.Fprintf(os.Stderr, "       echo 'example.com' | httprobe\n\n")
+		fmt.Fprintf(os.Stderr, "Flags:\n")
+		flag.PrintDefaults()
 		os.Exit(1)
 	}
 
-	fmt.Printf("%s%-52s %-6s %s%s\n", cyan, "URL", "STATUS", "TIME", reset)
-	fmt.Println(strings.Repeat("─", 70))
-
-	var wg sync.WaitGroup
 	results := make([]result, len(urls))
+	sem := make(chan struct{}, *concurrency)
+	var wg sync.WaitGroup
 
 	for i, url := range urls {
 		wg.Add(1)
 		go func(i int, url string) {
 			defer wg.Done()
+			sem <- struct{}{}
 			results[i] = probe(url, timeout)
+			<-sem
 		}(i, url)
 	}
 	wg.Wait()
 
+	if *jsonOutput {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		enc.Encode(results)
+		return
+	}
+
+	fmt.Printf("%s%-52s %-6s %s%s\n", cyan, "URL", "STATUS", "TIME", reset)
+	fmt.Println(strings.Repeat("─", 70))
+
 	up, down := 0, 0
 	for _, r := range results {
 		printResult(r)
-		if r.err != nil || r.status >= 400 {
+		if r.Error != "" || r.Status >= 400 {
 			down++
 		} else {
 			up++
