@@ -73,6 +73,8 @@ func main() {
 	timeoutSec := flag.Int("t", 10, "timeout per request in seconds")
 	concurrency := flag.Int("c", 10, "max concurrent requests")
 	jsonOutput := flag.Bool("j", false, "output results as JSON")
+	failOnly := flag.Bool("f", false, "show only failed requests (status >= 400 or errors)")
+	quiet := flag.Bool("q", false, "suppress output, exit with code 1 if any probe fails")
 	flag.Parse()
 
 	timeout := time.Duration(*timeoutSec) * time.Second
@@ -116,24 +118,47 @@ func main() {
 	}
 	wg.Wait()
 
+	up, down := 0, 0
+	for _, r := range results {
+		if r.Error != "" || r.Status >= 400 {
+			down++
+		} else {
+			up++
+		}
+	}
+
+	if *quiet {
+		if down > 0 {
+			os.Exit(1)
+		}
+		return
+	}
+
 	if *jsonOutput {
+		filtered := results
+		if *failOnly {
+			filtered = nil
+			for _, r := range results {
+				if r.Error != "" || r.Status >= 400 {
+					filtered = append(filtered, r)
+				}
+			}
+		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		enc.Encode(results)
+		enc.Encode(filtered)
 		return
 	}
 
 	fmt.Printf("%s%-52s %-6s %s%s\n", cyan, "URL", "STATUS", "TIME", reset)
 	fmt.Println(strings.Repeat("─", 70))
 
-	up, down := 0, 0
 	for _, r := range results {
-		printResult(r)
-		if r.Error != "" || r.Status >= 400 {
-			down++
-		} else {
-			up++
+		isFail := r.Error != "" || r.Status >= 400
+		if *failOnly && !isFail {
+			continue
 		}
+		printResult(r)
 	}
 
 	fmt.Println(strings.Repeat("─", 70))
