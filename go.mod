@@ -1,3 +1,3 @@
-module github.com/clarabennett2626/httprobe
+module github.com/clarabennettdev/httprobe
 
 go 1.21
